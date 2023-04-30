@@ -25,6 +25,7 @@
 #include "b64.h"
 #include "debug.h"
 #include "util.h"
+#include "authtok.h"
 
 #define SSH_MAX_SIZE 8192
 #define SSH_HEADER "-----BEGIN OPENSSH PRIVATE KEY-----\n"
@@ -164,12 +165,13 @@ static void reset_device(device_t *device) {
   free(device->publicKey);
   free(device->coseType);
   free(device->attributes);
+  free(device->enc_authtok);
   memset(device, 0, sizeof(*device));
 }
 
 static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
   const char *delim = ",";
-  const char *kh, *pk, *type, *attr;
+  const char *kh, *pk, *type, *attr, *enc_authtok;
   char *saveptr = NULL;
 
   memset(cred, 0, sizeof(*cred));
@@ -192,12 +194,16 @@ static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
   } else if ((attr = strtok_r(NULL, delim, &saveptr)) == NULL) {
     debug_dbg(cfg, "Empty attributes");
     attr = "";
+  } else if ((enc_authtok = strtok_r(NULL, delim, &saveptr)) == NULL) {
+    debug_dbg(cfg, "Missing encrypted auth token");
+    enc_authtok = "*";
   }
 
   cred->keyHandle = cred->old_format ? normal_b64(kh) : strdup(kh);
   if (cred->keyHandle == NULL || (cred->publicKey = strdup(pk)) == NULL ||
       (cred->coseType = strdup(type)) == NULL ||
-      (cred->attributes = strdup(attr)) == NULL) {
+      (cred->attributes = strdup(attr)) == NULL ||
+      (cred->enc_authtok = strdup(enc_authtok)) == NULL) {
     debug_dbg(cfg, "Unable to allocate memory for credential components");
     goto fail;
   }
@@ -260,6 +266,8 @@ static int parse_native_format(const cfg_t *cfg, const char *username,
                   devices[i].coseType);
         debug_dbg(cfg, "Attributes for device number %u: %s", i + 1,
                   devices[i].attributes);
+        debug_dbg(cfg, "Encrypted auth token for device number %u: %s", i + 1,
+                  devices[i].enc_authtok);
         i++;
       }
     }
@@ -992,6 +1000,8 @@ static fido_assert_t *prepare_assert(const cfg_t *cfg, const device_t *device,
   fido_assert_t *assert = NULL;
   unsigned char *buf = NULL;
   size_t buf_len;
+  unsigned char *enc_authtok = NULL;
+  size_t enc_authtok_len;
   int ok = 0;
   int r;
 
@@ -1036,6 +1046,26 @@ static fido_assert_t *prepare_assert(const cfg_t *cfg, const device_t *device,
     goto err;
   }
 
+  if (cfg->allowauthtok && strcmp(device->enc_authtok, "*") != 0) {
+    if (!b64_decode(device->enc_authtok, (void **) &enc_authtok,
+                    &enc_authtok_len) ||
+        enc_authtok_len < HMAC_SALT_SIZE + AEAD_TAG_SIZE) {
+      debug_dbg(cfg, "Failed to decode encrypted auth token");
+      goto err;
+    }
+
+    if (fido_assert_set_extensions(assert, FIDO_EXT_HMAC_SECRET) != FIDO_OK) {
+      debug_dbg(cfg, "Failed to set extensions");
+      goto err;
+    }
+
+    if (fido_assert_set_hmac_salt(assert, enc_authtok, HMAC_SALT_SIZE) !=
+        FIDO_OK) {
+      debug_dbg(cfg, "Failed to set hmac salt");
+      goto err;
+    }
+  }
+
   ok = 1;
 
 err:
@@ -1043,6 +1073,7 @@ err:
     fido_assert_free(&assert);
 
   free(buf);
+  free(enc_authtok);
 
   return assert;
 }
@@ -1171,6 +1202,8 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
   struct opts opts;
   struct pk pk;
   char *pin = NULL;
+  char *authtok;
+  size_t authtok_len;
 
   init_opts(&opts);
 #ifndef WITH_FUZZING
@@ -1277,7 +1310,17 @@ int do_authentication(const cfg_t *cfg, const device_t *devices,
           }
           r = fido_assert_verify(assert, 0, pk.type, pk.ptr);
           if (r == FIDO_OK) {
-            retval = PAM_SUCCESS;
+            if (cfg->allowauthtok && strcmp(devices[i].enc_authtok, "*") != 0) {
+              if (get_authtok(assert, devices[i].enc_authtok, &authtok,
+                              &authtok_len)) {
+                pam_set_item(pamh, PAM_AUTHTOK, authtok);
+                explicit_bzero(authtok, authtok_len);
+                free(authtok);
+              } else {
+                debug_dbg(cfg, "Failed to decrypt auth token");
+              }
+            }
+            retval = 1;
             goto out;
           }
         }
