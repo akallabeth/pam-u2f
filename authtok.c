@@ -66,7 +66,7 @@ decrypt_authtok(const unsigned char *ciphertext, size_t ciphertext_len,
                          (int) ciphertext_len)) {
     goto err;
   }
-  if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, (void *) tag)) {
+  if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_TAG, 16, (void*) tag)) {
     goto err;
   }
   if (!EVP_DecryptFinal_ex(ctx, plaintext + len, &len)) {
@@ -236,7 +236,7 @@ int generate_encrypted_authtok(fido_dev_t *dev, fido_cred_t *cred,
   if (!get_hmac_secret(dev, cred, uv, pin, *enc_authtok, key)) {
     goto err;
   }
-  if (!encrypt_authtok((unsigned char *) authtok, authtok_len, key,
+  if (!encrypt_authtok((const unsigned char *) authtok, authtok_len, key,
                        *enc_authtok + HMAC_SALT_SIZE + authtok_len,
                        *enc_authtok + HMAC_SALT_SIZE)) {
     goto err;

@@ -157,6 +157,7 @@ set(PAM_U2F_SOURCES
 	debug.c
 	drop_privs.h
 	expand.c
+	authtok.c
 	util.c
 	explicit_bzero.c
 )

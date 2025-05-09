@@ -172,31 +172,31 @@ static void reset_device(device_t *device) {
 static int parse_native_credential(const cfg_t *cfg, char *s, device_t *cred) {
   const char *delim = ",";
   const char *kh, *pk, *type, *attr, *enc_authtok;
-  char *saveptr = s;
+  char *saveptr = NULL;
 
   memset(cred, 0, sizeof(*cred));
 
-  if ((kh = strsep(&saveptr, delim)) == NULL) {
+  if ((kh = strtok_r(s, delim, &saveptr)) == NULL) {
     debug_dbg(cfg, "Missing key handle");
     goto fail;
   }
 
-  if ((pk = strsep(&saveptr, delim)) == NULL) {
+  if ((pk = strtok_r(NULL, delim, &saveptr)) == NULL) {
     debug_dbg(cfg, "Missing public key");
     goto fail;
   }
 
-  if ((type = strsep(&saveptr, delim)) == NULL) {
+  if ((type = strtok_r(NULL, delim, &saveptr)) == NULL) {
     debug_dbg(cfg, "Old format, assume es256 and +presence");
     cred->old_format = 1;
     type = "es256";
     attr = "+presence";
     enc_authtok = "*";
-  } else if ((attr = strsep(&saveptr, delim)) == NULL) {
+  } else if ((attr = strtok_r(NULL, delim, &saveptr)) == NULL) {
     debug_dbg(cfg, "Empty attributes");
     attr = "";
     enc_authtok = "*";
-  } else if ((enc_authtok = strsep(&saveptr, delim)) == NULL) {
+  } else if ((enc_authtok = strtok_r(NULL, delim, &saveptr)) == NULL) {
     debug_dbg(cfg, "Missing encrypted auth token");
     enc_authtok = "*";
   }
